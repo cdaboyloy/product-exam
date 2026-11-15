@@ -1,0 +1,13 @@
+product-api/vendor/
+product-api/node_modules/
+product-api/.env
+product-api/database/database.sqlite
+product-api/public/storage
+product-api/storage/app/public/*
+!product-api/storage/app/public/.gitignore
+product_app/build/
+product_app/.dart_tool/
+
+.DS_Store
+**/.DS_Store
+product-api/.phpunit.result.cache
