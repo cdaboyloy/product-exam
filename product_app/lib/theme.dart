@@ -1,201 +1,104 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// Design tokens — soft, airy, translucent pastel (light theme)
-class AppColors {
-  static const bg = Color(0xFFF8F7FF); // airy lavender-white
-  static const surface = Colors.white;
-  static const glass = Color(0xD9FFFFFF); // white @ 85% — translucent cards
-  static const glassBorder = Color(0xB3FFFFFF);
-  static const field = Color(0xFFF4F2FE);
-  static const text = Color(0xFF2B2840);
-  static const muted = Color(0xFF6E6A85);
-  static const primary = Color(0xFF6C5CE7); // text/icons (AA on white)
-  static const primaryLight = Color(0xFFB3A6FF);
-  static const primarySoft = Color(0xFFF0EDFF);
-  static const accent = Color(0xFFF9A8D4);
-  static const sky = Color(0xFFA5D8FF);
-  static const mint = Color(0xFFB2F2DE);
-  static const success = Color(0xFF0F9F6E);
-  static const warning = Color(0xFFC77700);
-  static const danger = Color(0xFFE5486B);
+/// Pocket Mart — modern shopping-app look: light grey canvas, white rounded
+/// cards with soft shadows, warm coral accent, navy text.
+class Mart {
+  static const canvas = Color(0xFFF6F6F9);
+  static const card = Colors.white;
+  static const navy = Color(0xFF1E2340);
+  static const grey = Color(0xFF8A8FA3);
+  static const greyLight = Color(0xFFEDEEF3);
+  static const coral = Color(0xFFFF6B3D);
+  static const coralDeep = Color(0xFFE5532A);
+  static const coralTint = Color(0xFFFFF0EA);
+  static const peach = Color(0xFFFFE1D3);
+  static const mint = Color(0xFF12B886);
+  static const amber = Color(0xFFE8A100);
+  static const red = Color(0xFFE03131);
 
-  /// Buttons: soft periwinkle → violet (white bold text ≥ 3:1, large)
-  static const gradient = LinearGradient(
-    colors: [Color(0xFFA899FF), Color(0xFF7A6AF2)],
+  static const coralGradient = LinearGradient(
+    colors: [Color(0xFFFF8A5B), coral, coralDeep],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
-  /// Header: bright pastel wash (dark text on top)
-  static const headerGradient = LinearGradient(
-    colors: [Color(0xFFE4DDFF), Color(0xFFDCEBFF), Color(0xFFFDE4F2)],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
-}
+  static List<BoxShadow> shadow([double strength = 1]) => [
+    BoxShadow(
+      color: navy.withValues(alpha: 0.06 * strength),
+      blurRadius: 24,
+      offset: const Offset(0, 10),
+    ),
+  ];
 
-class AppRadius {
-  static const card = 28.0;
-  static const button = 20.0;
-  static const field = 16.0;
-}
+  /// Icon per category name (falls back to a generic tag)
+  static IconData categoryIcon(String? name) {
+    final n = (name ?? '').toLowerCase();
+    if (n.contains('drink') || n.contains('water') || n.contains('juice'))
+      return Icons.local_drink_rounded;
+    if (n.contains('snack') || n.contains('chip') || n.contains('cookie'))
+      return Icons.cookie_rounded;
+    if (n.contains('fruit')) return Icons.apple_rounded;
+    if (n.contains('milk') || n.contains('dairy')) return Icons.egg_alt_rounded;
+    return Icons.sell_rounded;
+  }
 
-class AppMotion {
-  static const fast = Duration(milliseconds: 160);
-  static const normal = Duration(milliseconds: 280);
-  static const slow = Duration(milliseconds: 450);
-  static const springOut = Curves.easeOutBack;
-
-  /// Respect the OS "reduce motion" / "remove animations" setting
-  static bool reduced(BuildContext context) =>
+  static bool reduceMotion(BuildContext context) =>
       MediaQuery.disableAnimationsOf(context);
 }
 
-/// Multi-layer clay shadow: soft tinted drop shadow + white top-left highlight
-List<BoxShadow> clayShadow({
-  Color tint = AppColors.primary,
-  double depth = 1,
-}) => [
-  BoxShadow(
-    color: tint.withValues(alpha: 0.10 * depth),
-    offset: Offset(0, 12 * depth),
-    blurRadius: 32 * depth,
-    spreadRadius: -10,
-  ),
-  BoxShadow(
-    color: tint.withValues(alpha: 0.04),
-    offset: const Offset(0, 2),
-    blurRadius: 6,
-  ),
-  const BoxShadow(
-    color: Colors.white,
-    offset: Offset(-3, -3),
-    blurRadius: 8,
-    spreadRadius: -2,
-  ),
-];
-
-/// Translucent "glass-clay" card: 85% white, bright rim, soft tinted shadow
-BoxDecoration clayBox({
-  Color color = AppColors.glass,
-  double radius = AppRadius.card,
-}) => BoxDecoration(
-  color: color,
-  borderRadius: BorderRadius.circular(radius),
-  border: Border.all(color: AppColors.glassBorder, width: 1.5),
-  boxShadow: clayShadow(),
-);
-
-/// Soft pastel page background with color washes (sits behind translucent cards)
-class SoftBackground extends StatelessWidget {
-  final Widget child;
-  const SoftBackground({super.key, required this.child});
-
-  Widget _wash(Color c, double size) => Container(
-    width: size,
-    height: size,
-    decoration: BoxDecoration(
-      shape: BoxShape.circle,
-      gradient: RadialGradient(colors: [c, c.withValues(alpha: 0)]),
-    ),
-  );
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        const Positioned.fill(child: ColoredBox(color: AppColors.bg)),
-        Positioned(
-          top: 220,
-          left: -120,
-          child: _wash(AppColors.sky.withValues(alpha: 0.35), 340),
-        ),
-        Positioned(
-          bottom: 60,
-          right: -140,
-          child: _wash(AppColors.accent.withValues(alpha: 0.28), 360),
-        ),
-        Positioned(
-          bottom: -120,
-          left: 40,
-          child: _wash(AppColors.mint.withValues(alpha: 0.30), 300),
-        ),
-        Positioned.fill(child: child),
-      ],
-    );
-  }
-}
-
 ThemeData buildTheme() {
-  final scheme = ColorScheme.fromSeed(
-    seedColor: AppColors.primary,
-    primary: AppColors.primary,
-    error: AppColors.danger,
-    surface: AppColors.surface,
-  );
-  final fieldBorder = OutlineInputBorder(
-    borderRadius: BorderRadius.circular(AppRadius.field),
-    borderSide: BorderSide.none,
+  final r = BorderRadius.circular(16);
+  OutlineInputBorder b(Color c, double w) => OutlineInputBorder(
+    borderRadius: r,
+    borderSide: BorderSide(color: c, width: w),
   );
 
   return ThemeData(
     useMaterial3: true,
-    colorScheme: scheme,
-    scaffoldBackgroundColor: AppColors.bg,
-    splashFactory: InkSparkle.splashFactory,
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: Mart.coral,
+      primary: Mart.coral,
+      onPrimary: Colors.white,
+      surface: Mart.card,
+      error: Mart.red,
+    ),
+    scaffoldBackgroundColor: Mart.canvas,
     appBarTheme: const AppBarTheme(
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
-      foregroundColor: AppColors.text,
+      foregroundColor: Mart.navy,
       elevation: 0,
+      scrolledUnderElevation: 0,
       systemOverlayStyle: SystemUiOverlayStyle.dark,
+      centerTitle: true,
       titleTextStyle: TextStyle(
-        color: AppColors.text,
-        fontSize: 20,
-        fontWeight: FontWeight.w800,
-      ),
-    ),
-    textTheme: const TextTheme(
-      headlineMedium: TextStyle(
-        fontWeight: FontWeight.w800,
-        color: AppColors.text,
-      ),
-      headlineSmall: TextStyle(
-        fontWeight: FontWeight.w800,
-        color: AppColors.text,
-      ),
-      titleMedium: TextStyle(
+        color: Mart.navy,
+        fontSize: 18,
         fontWeight: FontWeight.w700,
-        color: AppColors.text,
       ),
-      bodyMedium: TextStyle(color: AppColors.text, height: 1.45),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: AppColors.field,
+      fillColor: Mart.card,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      labelStyle: const TextStyle(color: AppColors.muted),
-      floatingLabelStyle: const TextStyle(
-        color: AppColors.primary,
-        fontWeight: FontWeight.w600,
-      ),
-      border: fieldBorder,
-      enabledBorder: fieldBorder,
-      focusedBorder: fieldBorder.copyWith(
-        borderSide: const BorderSide(color: AppColors.primary, width: 2),
-      ),
-      errorBorder: fieldBorder.copyWith(
-        borderSide: const BorderSide(color: AppColors.danger, width: 1.5),
-      ),
-      focusedErrorBorder: fieldBorder.copyWith(
-        borderSide: const BorderSide(color: AppColors.danger, width: 2),
-      ),
+      border: b(Mart.greyLight, 1.2),
+      enabledBorder: b(Mart.greyLight, 1.2),
+      focusedBorder: b(Mart.coral, 1.6),
+      errorBorder: b(Mart.red, 1.2),
+      focusedErrorBorder: b(Mart.red, 1.6),
+      labelStyle: const TextStyle(color: Mart.grey),
+      hintStyle: const TextStyle(color: Mart.grey),
+      prefixIconColor: Mart.grey,
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: AppColors.text,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      backgroundColor: Mart.navy,
+      shape: RoundedRectangleBorder(borderRadius: r),
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: Mart.card,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
     ),
   );
 }

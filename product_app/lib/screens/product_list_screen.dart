@@ -1,20 +1,18 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../models/category.dart';
 import '../models/product.dart';
 import '../services/api_service.dart';
 import '../theme.dart';
-import '../widgets/motion.dart';
+import '../widgets/mart.dart';
 import '../widgets/product_image.dart';
-import '../widgets/ui.dart';
 import 'product_detail_screen.dart';
 import 'product_form_screen.dart';
 
-/// Screen 1: product list (READ) + search + category filter + delete
+/// Screen 1 — store front (READ): stock banner, categories, product grid
 class ProductListScreen extends StatefulWidget {
   const ProductListScreen({super.key});
 
@@ -23,8 +21,7 @@ class ProductListScreen extends StatefulWidget {
 }
 
 class _ProductListScreenState extends State<ProductListScreen> {
-  final _searchCtrl = TextEditingController();
-  final _scroll = ScrollController();
+  final _search = TextEditingController();
   Timer? _debounce;
 
   List<Product>? _items;
@@ -32,31 +29,19 @@ class _ProductListScreenState extends State<ProductListScreen> {
   int? _categoryId;
   Object? _error;
   bool _loading = true;
-  bool _fabVisible = true;
 
   @override
   void initState() {
     super.initState();
     _load();
     _loadCategories();
-    _scroll.addListener(_onScroll);
   }
 
   @override
   void dispose() {
     _debounce?.cancel();
-    _searchCtrl.dispose();
-    _scroll.dispose();
+    _search.dispose();
     super.dispose();
-  }
-
-  void _onScroll() {
-    final dir = _scroll.position.userScrollDirection;
-    if (dir == ScrollDirection.reverse && _fabVisible) {
-      setState(() => _fabVisible = false);
-    } else if (dir == ScrollDirection.forward && !_fabVisible) {
-      setState(() => _fabVisible = true);
-    }
   }
 
   Future<void> _load() async {
@@ -66,7 +51,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
     });
     try {
       final items = await ApiService.getProducts(
-        search: _searchCtrl.text.trim(),
+        search: _search.text.trim(),
         categoryId: _categoryId,
       );
       if (!mounted) return;
@@ -88,112 +73,101 @@ class _ProductListScreenState extends State<ProductListScreen> {
       final c = await ApiService.getCategories();
       if (mounted) setState(() => _categories = c);
     } catch (_) {
-      /* list screen still works without filter chips */
+      /* store front still works without categories */
     }
   }
 
-  void _onSearchChanged(String _) {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 400), _load);
-    setState(() {}); // toggle clear button
-  }
-
-  void _selectCategory(int? id) {
-    if (_categoryId == id) return;
-    setState(() => _categoryId = id);
-    _load();
-  }
-
-  Future<void> _retry() async {
+  Future<void> _refresh() async {
     if (_categories.isEmpty) _loadCategories();
     await _load();
   }
 
-  Future<void> _openForm([Product? product]) async {
+  void _onSearch(String _) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), _load);
+    setState(() {});
+  }
+
+  void _pick(int? id) {
+    if (_categoryId == id) return;
+    HapticFeedback.selectionClick();
+    setState(() => _categoryId = id);
+    _load();
+  }
+
+  Future<void> _openForm([Product? p]) async {
     final changed = await Navigator.push<bool>(
       context,
-      route3D(ProductFormScreen(product: product)),
+      slideIn(ProductFormScreen(product: p)),
     );
     if (changed == true) _load();
   }
 
-  Future<void> _openDetail(Product product) async {
+  Future<void> _openDetail(Product p) async {
     final changed = await Navigator.push<bool>(
       context,
-      route3D(ProductDetailScreen(product: product)),
+      slideIn(ProductDetailScreen(product: p)),
     );
     if (changed == true) _load();
-  }
-
-  /// Returns true when deleted (used by swipe-to-delete too)
-  Future<bool> _delete(Product p) async {
-    if (!await confirmDelete(context, p.productName)) return false;
-    try {
-      await ApiService.deleteProduct(p.productId!);
-      if (!mounted) return true;
-      showToast(context, '"${p.productName}" deleted');
-      return true;
-    } catch (e) {
-      if (mounted) showToast(context, '$e', error: true);
-      return false;
-    }
-  }
-
-  void _removeLocal(Product p) {
-    setState(() => _items?.removeWhere((x) => x.productId == p.productId));
   }
 
   @override
   Widget build(BuildContext context) {
     final items = _items ?? const <Product>[];
-    final totalQty = items.fold<int>(0, (s, p) => s + p.qty);
-    final stockValue = items.fold<double>(
-      0,
-      (s, p) => s + p.qty * p.unitPriceOut,
-    );
+    final units = items.fold<int>(0, (s, p) => s + p.qty);
+    final value = items.fold<double>(0, (s, p) => s + p.qty * p.unitPriceOut);
+    final low = items.where((p) => p.qty < 10).length;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.dark,
-      child: SoftBackground(
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          floatingActionButton: AnimatedSlide(
-            offset: _fabVisible ? Offset.zero : const Offset(0, 2),
-            duration: AppMotion.normal,
-            curve: Curves.easeOutCubic,
-            child: AnimatedScale(
-              scale: _fabVisible ? 1 : 0.6,
-              duration: AppMotion.normal,
-              curve: AppMotion.springOut,
-              child: SizedBox(
-                width: 178,
-                child: GradientButton(
-                  label: 'Add Product',
-                  icon: Icons.add_rounded,
-                  onPressed: () => _openForm(),
-                ),
-              ),
-            ),
+      child: Scaffold(
+        floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+        floatingActionButton: SizedBox(
+          width: 200,
+          child: CoralButton(
+            label: 'Add product',
+            icon: Icons.add_rounded,
+            onTap: () => _openForm(),
           ),
-          body: RefreshIndicator(
-            color: AppColors.primary,
-            edgeOffset: 120,
-            onRefresh: _retry,
+        ),
+        body: SafeArea(
+          bottom: false,
+          child: RefreshIndicator(
+            color: Mart.coral,
+            onRefresh: _refresh,
             child: CustomScrollView(
-              controller: _scroll,
               physics: const AlwaysScrollableScrollPhysics(
                 parent: BouncingScrollPhysics(),
               ),
               slivers: [
-                SliverToBoxAdapter(
-                  child: _Header(
-                    count: items.length,
-                    totalQty: totalQty,
-                    stockValue: stockValue,
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                  sliver: SliverList.list(
+                    children: [
+                      _header(),
+                      const SizedBox(height: 18),
+                      _searchField(),
+                      const SizedBox(height: 20),
+                      RiseIn(child: _banner(items.length, units, value, low)),
+                      if (_categories.isNotEmpty) ...[
+                        const SizedBox(height: 26),
+                        const SectionTitle('Categories'),
+                        const SizedBox(height: 12),
+                        _categoryRow(),
+                      ],
+                      const SizedBox(height: 22),
+                      SectionTitle(
+                        'Products',
+                        trailing: Text(
+                          '${items.length} items',
+                          style: const TextStyle(color: Mart.grey),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                   ),
                 ),
-                SliverToBoxAdapter(child: _buildSearchAndFilters()),
-                ..._buildContent(items),
+                ..._content(items),
               ],
             ),
           ),
@@ -202,460 +176,451 @@ class _ProductListScreenState extends State<ProductListScreen> {
     );
   }
 
-  Widget _buildSearchAndFilters() {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-          child: Container(
-            decoration: clayBox(radius: AppRadius.button),
-            child: TextField(
-              controller: _searchCtrl,
-              onChanged: _onSearchChanged,
-              textInputAction: TextInputAction.search,
-              onSubmitted: (_) => _load(),
-              decoration: InputDecoration(
-                fillColor: AppColors.surface,
-                hintText: 'Search name or barcode',
-                hintStyle: const TextStyle(color: AppColors.muted),
-                prefixIcon: const Icon(
-                  Icons.search_rounded,
-                  color: AppColors.primary,
-                ),
-                suffixIcon: _searchCtrl.text.isEmpty
-                    ? null
-                    : IconButton(
-                        tooltip: 'Clear search',
-                        icon: const Icon(Icons.close_rounded),
-                        onPressed: () {
-                          _searchCtrl.clear();
-                          setState(() {});
-                          _load();
-                        },
-                      ),
+  Widget _header() => Row(
+    children: [
+      Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          gradient: Mart.coralGradient,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Icon(Icons.storefront_rounded, color: Colors.white),
+      ),
+      const SizedBox(width: 12),
+      const Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Welcome back',
+              style: TextStyle(color: Mart.grey, fontSize: 13),
+            ),
+            Text(
+              'Pocket Mart',
+              style: TextStyle(
+                color: Mart.navy,
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
               ),
             ),
+          ],
+        ),
+      ),
+      RoundButton(
+        icon: Icons.refresh_rounded,
+        tooltip: 'Reload',
+        onTap: _refresh,
+      ),
+    ],
+  );
+
+  Widget _searchField() => Container(
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(16),
+      boxShadow: Mart.shadow(),
+    ),
+    child: TextField(
+      controller: _search,
+      onChanged: _onSearch,
+      textInputAction: TextInputAction.search,
+      decoration: InputDecoration(
+        hintText: 'Search products or barcode',
+        prefixIcon: const Icon(Icons.search_rounded),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        suffixIcon: _search.text.isEmpty
+            ? null
+            : IconButton(
+                tooltip: 'Clear',
+                icon: const Icon(Icons.cancel_rounded, color: Mart.grey),
+                onPressed: () {
+                  _search.clear();
+                  setState(() {});
+                  _load();
+                },
+              ),
+      ),
+    ),
+  );
+
+  Widget _banner(int count, int units, double value, int low) => Container(
+    padding: const EdgeInsets.all(20),
+    decoration: BoxDecoration(
+      gradient: Mart.coralGradient,
+      borderRadius: BorderRadius.circular(26),
+      boxShadow: [
+        BoxShadow(
+          color: Mart.coral.withValues(alpha: 0.3),
+          blurRadius: 24,
+          offset: const Offset(0, 12),
+        ),
+      ],
+    ),
+    child: Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Total stock value',
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.85)),
+              ),
+              const SizedBox(height: 4),
+              TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0, end: value),
+                duration: Mart.reduceMotion(context)
+                    ? Duration.zero
+                    : const Duration(milliseconds: 1000),
+                curve: Curves.easeOutCubic,
+                builder: (_, v, _) => Text(
+                  '\$${v.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 30,
+                    fontWeight: FontWeight.w800,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  _bannerPill(Icons.category_rounded, '$count products'),
+                  _bannerPill(Icons.inventory_2_rounded, '$units units'),
+                  if (low > 0)
+                    _bannerPill(Icons.warning_amber_rounded, '$low low'),
+                ],
+              ),
+            ],
           ),
         ),
-        if (_categories.isNotEmpty)
-          SizedBox(
-            height: 48,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              children: [
-                _CategoryChip(
-                  label: 'All',
-                  selected: _categoryId == null,
-                  onTap: () => _selectCategory(null),
-                ),
-                for (final c in _categories)
-                  _CategoryChip(
-                    label: c.categoryName,
-                    selected: _categoryId == c.categoryId,
-                    onTap: () => _selectCategory(c.categoryId),
-                  ),
-              ],
-            ),
+        Container(
+          width: 64,
+          height: 64,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.2),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.shopping_bag_rounded,
+            color: Colors.white,
+            size: 32,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _bannerPill(IconData icon, String text) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    decoration: BoxDecoration(
+      color: Colors.white.withValues(alpha: 0.2),
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: Colors.white),
+        const SizedBox(width: 4),
+        Text(
+          text,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _categoryRow() => SizedBox(
+    height: 96,
+    child: ListView(
+      scrollDirection: Axis.horizontal,
+      clipBehavior: Clip.none,
+      children: [
+        _categoryTile('All', Icons.apps_rounded, null),
+        for (final c in _categories)
+          _categoryTile(
+            c.categoryName,
+            Mart.categoryIcon(c.categoryName),
+            c.categoryId,
           ),
       ],
+    ),
+  );
+
+  Widget _categoryTile(String label, IconData icon, int? id) {
+    final selected = _categoryId == id;
+    return Padding(
+      padding: const EdgeInsets.only(right: 16),
+      child: Squeeze(
+        onTap: () => _pick(id),
+        semanticLabel: 'Show $label',
+        child: Column(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOut,
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                gradient: selected ? Mart.coralGradient : null,
+                color: selected ? null : Mart.card,
+                borderRadius: BorderRadius.circular(22),
+                boxShadow: Mart.shadow(selected ? 2 : 1),
+              ),
+              child: Icon(
+                icon,
+                color: selected ? Colors.white : Mart.coral,
+                size: 28,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? Mart.coral : Mart.navy,
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  List<Widget> _buildContent(List<Product> items) {
+  static const _grid = SliverGridDelegateWithFixedCrossAxisCount(
+    crossAxisCount: 2,
+    mainAxisSpacing: 16,
+    crossAxisSpacing: 16,
+    mainAxisExtent: 252,
+  );
+
+  List<Widget> _content(List<Product> items) {
     if (_loading && _items == null) {
-      return [
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 120),
-          sliver: SliverList.builder(
-            itemCount: 4,
-            itemBuilder: (_, _) => const _SkeletonCard(),
+      return const [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.all(48),
+            child: Center(child: CircularProgressIndicator(color: Mart.coral)),
           ),
         ),
       ];
     }
     if (_error != null) {
-      final err = _error;
-      final network = err is ApiException && err.isNetwork;
+      final e = _error;
+      final network = e is ApiException && e.isNetwork;
       return [
-        SliverFillRemaining(
-          hasScrollBody: false,
-          child: _StateView(
-            icon: Icons.cloud_off_rounded,
-            title: network ? "Can't reach the server" : 'Something went wrong',
-            message: network ? 'Make sure the Laravel API is running:' : '$err',
+        SliverToBoxAdapter(
+          child: _InfoCard(
+            icon: Icons.wifi_off_rounded,
+            title: network
+                ? 'Can\'t reach the store server'
+                : 'Something went wrong',
+            message: network ? 'Start the Laravel API and try again:' : '$e',
             code: network
                 ? 'php artisan serve --host=0.0.0.0 --port=8000'
                 : null,
-            actionLabel: 'Try again',
-            actionIcon: Icons.refresh_rounded,
-            onAction: _retry,
+            action: 'Try again',
+            onAction: _refresh,
           ),
         ),
       ];
     }
     if (items.isEmpty) {
+      final filtered = _search.text.isNotEmpty || _categoryId != null;
       return [
-        SliverFillRemaining(
-          hasScrollBody: false,
-          child: _StateView(
-            icon: Icons.inventory_2_rounded,
-            title: _searchCtrl.text.isNotEmpty || _categoryId != null
-                ? 'No matching products'
-                : 'No products yet',
-            message: 'Tap "Add Product" to create your first one.',
-            actionLabel: 'Add Product',
-            actionIcon: Icons.add_rounded,
-            onAction: () => _openForm(),
+        SliverToBoxAdapter(
+          child: _InfoCard(
+            icon: Icons.search_off_rounded,
+            title: filtered ? 'No products found' : 'Your store is empty',
+            message: filtered
+                ? 'Try another search or category.'
+                : 'Add your first product to start selling.',
+            action: filtered ? null : 'Add product',
+            onAction: filtered ? null : () => _openForm(),
           ),
         ),
       ];
     }
     return [
       SliverPadding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 120),
-        sliver: SliverList.builder(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 110),
+        sliver: SliverGrid.builder(
+          gridDelegate: _grid,
           itemCount: items.length,
-          itemBuilder: (_, i) {
-            final p = items[i];
-            return Padding(
-              key: ValueKey(p.productId),
-              padding: const EdgeInsets.only(bottom: 16),
-              child: StaggerIn(
-                index: i,
-                child: Dismissible(
-                  key: ValueKey('dismiss-${p.productId}'),
-                  direction: DismissDirection.endToStart,
-                  confirmDismiss: (_) => _delete(p),
-                  onDismissed: (_) => _removeLocal(p),
-                  background: const _SwipeDeleteBackground(),
-                  child: _ProductCard(
-                    product: p,
-                    onTap: () => _openDetail(p),
-                    onEdit: () => _openForm(p),
-                    onDelete: () async {
-                      if (await _delete(p)) _removeLocal(p);
-                    },
-                  ),
-                ),
-              ),
-            );
-          },
+          itemBuilder: (_, i) => RiseIn(
+            key: ValueKey(items[i].productId),
+            index: i,
+            child: _ProductCard(
+              product: items[i],
+              onOpen: () => _openDetail(items[i]),
+              onEdit: () => _openForm(items[i]),
+            ),
+          ),
         ),
       ),
     ];
   }
 }
 
-// ───────────────────────────── Header ─────────────────────────────
+class _ProductCard extends StatelessWidget {
+  final Product product;
+  final VoidCallback onOpen, onEdit;
 
-class _Header extends StatelessWidget {
-  final int count;
-  final int totalQty;
-  final double stockValue;
-
-  const _Header({
-    required this.count,
-    required this.totalQty,
-    required this.stockValue,
+  const _ProductCard({
+    required this.product,
+    required this.onOpen,
+    required this.onEdit,
   });
 
   @override
   Widget build(BuildContext context) {
-    final top = MediaQuery.paddingOf(context).top;
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(36)),
+    final p = product;
+    final low = p.qty < 10;
+    return Squeeze(
+      onTap: onOpen,
+      semanticLabel: 'Open ${p.productName}',
       child: Container(
-        decoration: const BoxDecoration(gradient: AppColors.headerGradient),
-        child: Stack(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Mart.card,
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: Mart.shadow(),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Positioned.fill(child: FloatingBlobs()),
-            Padding(
-              padding: EdgeInsets.fromLTRB(24, top + 18, 24, 26),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            SizedBox(
+              height: 130,
+              child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                  Hero(
+                    tag: 'mart-${p.productId}',
+                    child: ProductImage(url: p.imageUrl),
+                  ),
+                  if (low)
+                    Positioned(
+                      left: 8,
+                      top: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Mart.amber,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(
-                              'Inventory',
-                              style: TextStyle(
-                                color: AppColors.muted,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: 0.5,
-                              ),
+                            Icon(
+                              Icons.warning_amber_rounded,
+                              size: 12,
+                              color: Colors.white,
                             ),
-                            const SizedBox(height: 4),
-                            const Text(
-                              'Products',
+                            SizedBox(width: 3),
+                            Text(
+                              'Low',
                               style: TextStyle(
-                                color: AppColors.text,
-                                fontSize: 34,
-                                fontWeight: FontWeight.w900,
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
                           ],
                         ),
                       ),
-                      const Spin3DIcon(icon: Icons.view_in_ar_rounded),
-                    ],
-                  ),
-                  const SizedBox(height: 22),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _StatTile(
-                          label: 'Products',
-                          icon: Icons.category_rounded,
-                          value: count.toDouble(),
-                          format: (v) => v.round().toString(),
+                    ),
+                  Positioned(
+                    right: 6,
+                    top: 6,
+                    child: Tooltip(
+                      message: 'Edit ${p.productName}',
+                      child: Squeeze(
+                        onTap: onEdit,
+                        semanticLabel: 'Edit ${p.productName}',
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: Mart.card,
+                            shape: BoxShape.circle,
+                            boxShadow: Mart.shadow(),
+                          ),
+                          child: const Icon(
+                            Icons.edit_rounded,
+                            size: 18,
+                            color: Mart.coral,
+                          ),
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _StatTile(
-                          label: 'In stock',
-                          icon: Icons.inventory_rounded,
-                          value: totalQty.toDouble(),
-                          format: (v) => v.round().toString(),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _StatTile(
-                          label: 'Value',
-                          icon: Icons.payments_rounded,
-                          value: stockValue,
-                          format: (v) => '\$${v.toStringAsFixed(0)}',
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ],
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StatTile extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final double value;
-  final String Function(double) format;
-
-  const _StatTile({
-    required this.label,
-    required this.icon,
-    required this.value,
-    required this.format,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.9),
-          width: 1.5,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: AppColors.primary, size: 20),
-          const SizedBox(height: 8),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: CountUp(
-              value: value,
-              format: format,
+            const SizedBox(height: 10),
+            Text(
+              p.productName,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                color: AppColors.text,
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-                fontFeatures: [FontFeature.tabularFigures()],
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: Mart.navy,
+                height: 1.2,
               ),
             ),
-          ),
-          Text(label, style: TextStyle(color: AppColors.muted, fontSize: 12)),
-        ],
-      ),
-    );
-  }
-}
-
-// ───────────────────────────── Chips ─────────────────────────────
-
-class _CategoryChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _CategoryChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 10, bottom: 4),
-      child: Pressable3D(
-        onTap: onTap,
-        pressedScale: 0.9,
-        semanticLabel: 'Filter: $label',
-        child: AnimatedContainer(
-          duration: AppMotion.normal,
-          curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 18),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            gradient: selected ? AppColors.gradient : null,
-            color: selected ? null : AppColors.surface,
-            borderRadius: BorderRadius.circular(999),
-            boxShadow: selected
-                ? [
-                    BoxShadow(
-                      color: AppColors.primary.withValues(alpha: 0.3),
-                      blurRadius: 14,
-                      offset: const Offset(0, 6),
-                      spreadRadius: -4,
-                    ),
-                  ]
-                : clayShadow(depth: 0.4),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AnimatedSize(
-                duration: AppMotion.fast,
-                child: selected
-                    ? const Padding(
-                        padding: EdgeInsets.only(right: 6),
-                        child: Icon(
-                          Icons.check_rounded,
-                          size: 16,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const SizedBox.shrink(),
-              ),
-              Text(
-                label,
-                style: TextStyle(
-                  color: selected ? Colors.white : AppColors.text,
-                  fontWeight: FontWeight.w700,
+            const SizedBox(height: 3),
+            Row(
+              children: [
+                Icon(
+                  Mart.categoryIcon(p.category?.categoryName),
+                  size: 13,
+                  color: Mart.grey,
                 ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ───────────────────────────── Product card ─────────────────────────────
-
-class _ProductCard extends StatelessWidget {
-  final Product product;
-  final VoidCallback onTap, onEdit, onDelete;
-
-  const _ProductCard({
-    required this.product,
-    required this.onTap,
-    required this.onEdit,
-    required this.onDelete,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final low = product.qty < 10;
-    return Pressable3D(
-      onTap: onTap,
-      semanticLabel: 'Open ${product.productName}',
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: clayBox(),
-        child: Row(
-          children: [
-            Hero(
-              tag: 'product-img-${product.productId}',
-              child: ProductImage(url: product.imageUrl, size: 76, radius: 22),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    product.productName,
-                    maxLines: 2,
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    p.category?.categoryName ?? '—',
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.text,
-                    ),
+                    style: const TextStyle(color: Mart.grey, fontSize: 12),
                   ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: [
-                      Pill(text: product.category?.categoryName ?? '-'),
-                      Pill(
-                        text: low
-                            ? 'Low · ${product.qty}'
-                            : 'Qty ${product.qty}',
-                        icon: low
-                            ? Icons.warning_amber_rounded
-                            : Icons.inventory_2_outlined,
-                        color: low ? AppColors.warning : AppColors.success,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '\$${product.unitPriceOut.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
-                      color: AppColors.primary,
-                      fontFeatures: [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Column(
-              children: [
-                ClayIconButton(
-                  icon: Icons.edit_rounded,
-                  tooltip: 'Edit',
-                  onTap: onEdit,
                 ),
-                const SizedBox(height: 10),
-                ClayIconButton(
-                  icon: Icons.delete_rounded,
-                  tooltip: 'Delete',
-                  color: AppColors.danger,
-                  onTap: onDelete,
+              ],
+            ),
+            const Spacer(),
+            Row(
+              children: [
+                Text(
+                  '\$${p.unitPriceOut.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    color: Mart.coral,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  'Qty ${p.qty}',
+                  style: TextStyle(
+                    color: low ? Mart.amber : Mart.grey,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -666,168 +631,83 @@ class _ProductCard extends StatelessWidget {
   }
 }
 
-class _SwipeDeleteBackground extends StatelessWidget {
-  const _SwipeDeleteBackground();
-
-  @override
-  Widget build(BuildContext context) => Container(
-    alignment: Alignment.centerRight,
-    padding: const EdgeInsets.only(right: 28),
-    decoration: BoxDecoration(
-      gradient: const LinearGradient(
-        colors: [Color(0xFFFDA4AF), AppColors.danger],
-      ),
-      borderRadius: BorderRadius.circular(AppRadius.card),
-    ),
-    child: const Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.delete_forever_rounded, color: Colors.white, size: 30),
-        SizedBox(height: 4),
-        Text(
-          'Delete',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-        ),
-      ],
-    ),
-  );
-}
-
-class _SkeletonCard extends StatelessWidget {
-  const _SkeletonCard();
-
-  @override
-  Widget build(BuildContext context) {
-    Widget bar(double w, double h) => Container(
-      width: w,
-      height: h,
-      decoration: BoxDecoration(
-        color: const Color(0xFFECE8F6),
-        borderRadius: BorderRadius.circular(8),
-      ),
-    );
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(14),
-      decoration: clayBox(),
-      child: Shimmer(
-        child: Row(
-          children: [
-            Container(
-              width: 76,
-              height: 76,
-              decoration: BoxDecoration(
-                color: const Color(0xFFECE8F6),
-                borderRadius: BorderRadius.circular(22),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                bar(140, 16),
-                const SizedBox(height: 10),
-                bar(90, 14),
-                const SizedBox(height: 10),
-                bar(60, 18),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ───────────────────────────── Empty / error ─────────────────────────────
-
-class _StateView extends StatelessWidget {
+class _InfoCard extends StatelessWidget {
   final IconData icon;
   final String title;
   final String message;
   final String? code;
-  final String actionLabel;
-  final IconData actionIcon;
-  final VoidCallback onAction;
+  final String? action;
+  final VoidCallback? onAction;
 
-  const _StateView({
+  const _InfoCard({
     required this.icon,
     required this.title,
     required this.message,
     this.code,
-    required this.actionLabel,
-    required this.actionIcon,
-    required this.onAction,
+    this.action,
+    this.onAction,
   });
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(32, 24, 32, 120),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Bob(
-            child: Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFFEDE9FF), Color(0xFFFCE7F3)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(40),
-                boxShadow: clayShadow(),
-              ),
-              child: Icon(icon, size: 56, color: AppColors.primary),
-            ),
-          ),
-          const SizedBox(height: 28),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              color: AppColors.text,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: AppColors.muted, height: 1.5),
-          ),
-          if (code != null) ...[
-            const SizedBox(height: 12),
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(20, 0, 20, 110),
+    child: RiseIn(
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Mart.card,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: Mart.shadow(),
+        ),
+        child: Column(
+          children: [
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: AppColors.text,
-                borderRadius: BorderRadius.circular(12),
+              width: 72,
+              height: 72,
+              decoration: const BoxDecoration(
+                color: Mart.coralTint,
+                shape: BoxShape.circle,
               ),
-              child: SelectableText(
-                code!,
-                style: const TextStyle(
-                  color: Color(0xFFC4B5FD),
-                  fontFamily: 'monospace',
-                  fontSize: 12.5,
+              child: Icon(icon, color: Mart.coral, size: 34),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: Mart.navy,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Mart.grey, height: 1.4),
+            ),
+            if (code != null) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Mart.navy,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: SelectableText(
+                  code!,
+                  style: const TextStyle(color: Mart.peach, fontSize: 12.5),
                 ),
               ),
-            ),
+            ],
+            if (action != null) ...[
+              const SizedBox(height: 18),
+              CoralButton(label: action!, onTap: onAction),
+            ],
           ],
-          const SizedBox(height: 28),
-          SizedBox(
-            width: 200,
-            child: GradientButton(
-              label: actionLabel,
-              icon: actionIcon,
-              onPressed: onAction,
-            ),
-          ),
-        ],
+        ),
       ),
-    );
-  }
+    ),
+  );
 }

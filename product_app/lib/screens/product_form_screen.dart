@@ -9,13 +9,10 @@ import '../models/category.dart';
 import '../models/product.dart';
 import '../services/api_service.dart';
 import '../theme.dart';
-import '../widgets/motion.dart';
+import '../widgets/mart.dart';
 import '../widgets/product_image.dart';
-import '../widgets/ui.dart';
 
-/// Screen 3: form to CREATE and UPDATE a product
-/// - product == null → create
-/// - product != null → edit
+/// Screen 3 — CREATE / UPDATE a product (product == null → create)
 class ProductFormScreen extends StatefulWidget {
   final Product? product;
   const ProductFormScreen({super.key, this.product});
@@ -30,21 +27,30 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       _desc,
       _barcode,
       _qty,
-      _priceIn,
-      _priceOut,
+      _cost,
+      _price,
       _expire;
 
   List<Category> _categories = [];
   int? _categoryId;
   XFile? _image;
-  Uint8List? _imageBytes; // preview (works on web too)
+  Uint8List? _imageBytes;
   bool _loadingCategories = true;
   bool _saving = false;
-  bool _saved = false;
   bool _dirty = false;
-  bool _imageError = false; // new product must have an image
+  bool _photoMissing = false;
+  bool _categoryMissing = false;
 
   bool get _isEdit => widget.product != null;
+  List<TextEditingController> get _fields => [
+    _name,
+    _desc,
+    _barcode,
+    _qty,
+    _cost,
+    _price,
+    _expire,
+  ];
 
   @override
   void initState() {
@@ -53,39 +59,24 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _name = TextEditingController(text: p?.productName ?? '');
     _desc = TextEditingController(text: p?.description ?? '');
     _barcode = TextEditingController(text: p?.barcode ?? '');
-    _qty = TextEditingController(text: p?.qty.toString() ?? '0');
-    _priceIn = TextEditingController(
-      text: p?.unitPriceIn.toStringAsFixed(2) ?? '0.00',
+    _qty = TextEditingController(text: '${p?.qty ?? 1}');
+    _cost = TextEditingController(
+      text: p?.unitPriceIn.toStringAsFixed(2) ?? '',
     );
-    _priceOut = TextEditingController(
-      text: p?.unitPriceOut.toStringAsFixed(2) ?? '0.00',
+    _price = TextEditingController(
+      text: p?.unitPriceOut.toStringAsFixed(2) ?? '',
     );
     _expire = TextEditingController(text: p?.expireDate ?? '');
     _categoryId = p?.categoryId;
-    for (final c in _controllers) {
-      c.addListener(_markDirty);
+    for (final c in _fields) {
+      c.addListener(() => setState(() => _dirty = true));
     }
     _loadCategories();
   }
 
-  List<TextEditingController> get _controllers => [
-    _name,
-    _desc,
-    _barcode,
-    _qty,
-    _priceIn,
-    _priceOut,
-    _expire,
-  ];
-
-  void _markDirty() {
-    if (!_dirty) _dirty = true;
-    setState(() {}); // live profit preview
-  }
-
   @override
   void dispose() {
-    for (final c in _controllers) {
+    for (final c in _fields) {
       c.dispose();
     }
     super.dispose();
@@ -94,38 +85,50 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   Future<void> _loadCategories() async {
     try {
       final list = await ApiService.getCategories();
-      if (!mounted) return;
-      setState(() {
-        _categories = list;
-        _loadingCategories = false;
-      });
+      if (mounted) setState(() => _categories = list);
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _loadingCategories = false);
-      showToast(context, 'Cannot load categories: $e', error: true);
+      if (mounted)
+        notify(context, 'Could not load categories: $e', error: true);
+    } finally {
+      if (mounted) setState(() => _loadingCategories = false);
     }
   }
 
-  /// Bottom sheet: choose where the image comes from
-  Future<void> _chooseImageSource() async {
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => _ImageSourceSheet(
-        hasImage: _imageBytes != null,
-        onRemove: () {
-          Navigator.pop(ctx);
-          setState(() {
-            _image = null;
-            _imageBytes = null;
-          });
-        },
-      ),
-    );
-    if (source != null) await _pickImage(source);
-  }
-
-  Future<void> _pickImage(ImageSource source) async {
+  Future<void> _choosePhoto() async {
+    final source = kIsWeb
+        ? ImageSource
+              .gallery // browser: one file chooser (photos/camera on phones, files on laptops)
+        : await showModalBottomSheet<ImageSource>(
+            context: context,
+            backgroundColor: Mart.card,
+            showDragHandle: true,
+            shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            builder: (ctx) => SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                child: Row(
+                  children: [
+                    _sourceTile(
+                      ctx,
+                      Icons.photo_library_rounded,
+                      'Gallery',
+                      ImageSource.gallery,
+                    ),
+                    const SizedBox(width: 12),
+                    _sourceTile(
+                      ctx,
+                      Icons.photo_camera_rounded,
+                      'Camera',
+                      ImageSource.camera,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+    if (source == null) return;
     try {
       final x = await ImagePicker().pickImage(
         source: source,
@@ -138,19 +141,50 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       setState(() {
         _image = x;
         _imageBytes = bytes;
-        _imageError = false;
+        _photoMissing = false;
         _dirty = true;
       });
     } catch (e) {
-      if (mounted) showToast(context, 'Cannot open image: $e', error: true);
+      if (mounted) notify(context, 'Could not open image: $e', error: true);
     }
   }
 
+  Widget _sourceTile(
+    BuildContext ctx,
+    IconData icon,
+    String label,
+    ImageSource s,
+  ) => Expanded(
+    child: Squeeze(
+      onTap: () => Navigator.pop(ctx, s),
+      semanticLabel: label,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        decoration: BoxDecoration(
+          color: Mart.coralTint,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: Mart.coral, size: 30),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                color: Mart.navy,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
   Future<void> _pickDate() async {
-    final initial = DateTime.tryParse(_expire.text) ?? DateTime.now();
     final d = await showDatePicker(
       context: context,
-      initialDate: initial,
+      initialDate: DateTime.tryParse(_expire.text) ?? DateTime.now(),
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
     );
@@ -160,21 +194,36 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     }
   }
 
-  void _stepQty(int delta) {
+  void _step(int delta) {
     HapticFeedback.selectionClick();
-    final v = math.max(0, (int.tryParse(_qty.text) ?? 0) + delta);
-    _qty.text = '$v';
+    _qty.text = '${math.max(0, (int.tryParse(_qty.text) ?? 0) + delta)}';
+  }
+
+  String? _money(String? v) {
+    if (v == null || v.trim().isEmpty) return null;
+    final n = double.tryParse(v);
+    if (n == null) return 'Numbers only';
+    if (n < 0) return 'Must be 0 or more';
+    return null;
   }
 
   Future<void> _save() async {
     FocusScope.of(context).unfocus();
-    final needsImage = !_isEdit && _imageBytes == null;
-    setState(() => _imageError = needsImage);
-    final formOk = _formKey.currentState!.validate();
-    if (!formOk || needsImage) {
-      if (needsImage)
-        showToast(context, 'Please add a product image', error: true);
-      HapticFeedback.heavyImpact();
+    final needPhoto = !_isEdit && _imageBytes == null;
+    final needCategory = _categoryId == null;
+    setState(() {
+      _photoMissing = needPhoto;
+      _categoryMissing = needCategory;
+    });
+    if (!_formKey.currentState!.validate() || needPhoto || needCategory) {
+      HapticFeedback.mediumImpact();
+      notify(
+        context,
+        needPhoto
+            ? 'Please add a product photo'
+            : 'Please complete the required fields',
+        error: true,
+      );
       return;
     }
     setState(() => _saving = true);
@@ -186,8 +235,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       barcode: _barcode.text.trim(),
       expireDate: _expire.text.trim(),
       qty: int.tryParse(_qty.text) ?? 0,
-      unitPriceIn: double.tryParse(_priceIn.text) ?? 0,
-      unitPriceOut: double.tryParse(_priceOut.text) ?? 0,
+      unitPriceIn: double.tryParse(_cost.text) ?? 0,
+      unitPriceOut: double.tryParse(_price.text) ?? 0,
     );
 
     try {
@@ -201,629 +250,445 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         await ApiService.createProduct(product, image: _image);
       }
       if (!mounted) return;
-      setState(() {
-        _saving = false;
-        _saved = true; // button morphs into a green check
-      });
-      showToast(context, _isEdit ? 'Product updated' : 'Product created');
-      await Future.delayed(const Duration(milliseconds: 650));
-      if (mounted) Navigator.pop(context, true);
+      _dirty = false;
+      notify(
+        context,
+        _isEdit ? 'Product updated' : 'Product added to your store',
+      );
+      Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
-      showToast(context, '$e', error: true);
+      notify(context, '$e', error: true);
     }
-  }
-
-  Future<bool> _confirmDiscard() async {
-    final res = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadius.card),
-        ),
-        title: const Text('Discard changes?'),
-        content: const Text('Your edits will be lost.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Keep editing'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Discard'),
-          ),
-        ],
-      ),
-    );
-    return res ?? false;
-  }
-
-  String? _required(String? v) =>
-      (v == null || v.trim().isEmpty) ? 'Please enter a product name' : null;
-
-  String? _number(String? v) {
-    if (v == null || v.isEmpty) return null;
-    final n = double.tryParse(v);
-    if (n == null) return 'Enter a number, e.g. 1.50';
-    if (n < 0) return 'Cannot be negative';
-    return null;
   }
 
   @override
   Widget build(BuildContext context) {
-    final priceIn = double.tryParse(_priceIn.text) ?? 0;
-    final priceOut = double.tryParse(_priceOut.text) ?? 0;
-    final profit = priceOut - priceIn;
+    final profit =
+        (double.tryParse(_price.text) ?? 0) -
+        (double.tryParse(_cost.text) ?? 0);
 
     return PopScope(
-      canPop: !_dirty || _saved,
+      canPop: !_dirty,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
-        if (await _confirmDiscard() && context.mounted) {
-          _dirty = false;
+        final leave = await ask(
+          context,
+          title: 'Discard changes?',
+          message: 'What you entered will not be saved.',
+          yes: 'Discard',
+          icon: Icons.undo_rounded,
+        );
+        if (leave && context.mounted) {
+          setState(() => _dirty = false);
           Navigator.pop(context);
         }
       },
-      child: SoftBackground(
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          appBar: AppBar(
-            backgroundColor: AppColors.bg.withValues(alpha: 0.85),
-            scrolledUnderElevation: 0,
-            leading: Padding(
-              padding: const EdgeInsets.only(left: 12),
-              child: Center(
-                child: ClayIconButton(
-                  icon: Icons.close_rounded,
-                  tooltip: 'Close',
-                  size: 44,
-                  color: AppColors.text,
-                  onTap: () => Navigator.maybePop(context),
-                ),
+      child: Scaffold(
+        appBar: AppBar(
+          leadingWidth: 72,
+          leading: Padding(
+            padding: const EdgeInsets.only(left: 16),
+            child: Center(
+              child: RoundButton(
+                icon: Icons.arrow_back_rounded,
+                tooltip: 'Back',
+                onTap: () => Navigator.maybePop(context),
               ),
             ),
-            leadingWidth: 68,
-            title: Text(_isEdit ? 'Edit Product' : 'New Product'),
           ),
-          body: Form(
-            key: _formKey,
-            child: ListView(
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-              children: [
-                StaggerIn(
-                  index: 0,
-                  child: Column(
-                    children: [
-                      Center(child: _imagePicker()),
-                      AnimatedSwitcher(
-                        duration: AppMotion.normal,
-                        child: _imageError
-                            ? const Padding(
-                                key: ValueKey('img-err'),
-                                padding: EdgeInsets.only(top: 14),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.error_outline_rounded,
-                                      size: 16,
-                                      color: AppColors.danger,
-                                    ),
-                                    SizedBox(width: 6),
-                                    Text(
-                                      'Product image is required — tap to add one',
-                                      style: TextStyle(
-                                        color: AppColors.danger,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              )
-                            : !_isEdit && _imageBytes == null
-                            ? const Padding(
-                                key: ValueKey('img-hint'),
-                                padding: EdgeInsets.only(top: 14),
-                                child: Text(
-                                  'Tap to add a product image *',
-                                  style: TextStyle(
-                                    color: AppColors.muted,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              )
-                            : const SizedBox.shrink(key: ValueKey('img-ok')),
-                      ),
-                    ],
+          title: Text(_isEdit ? 'Edit product' : 'Add product'),
+        ),
+        body: Form(
+          key: _formKey,
+          child: ListView(
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+            children: [
+              RiseIn(child: _photoCard()),
+              const SizedBox(height: 16),
+              RiseIn(
+                index: 1,
+                child: _card('Product info', [
+                  TextFormField(
+                    controller: _name,
+                    maxLength: 100,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                      labelText: 'Product name',
+                      prefixIcon: Icon(Icons.shopping_bag_outlined),
+                      counterText: '',
+                    ),
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'Product name is required'
+                        : null,
                   ),
-                ),
-                const SizedBox(height: 24),
-                StaggerIn(
-                  index: 1,
-                  child: _Section(
-                    icon: Icons.info_rounded,
-                    title: 'Basic info',
-                    children: [
-                      TextFormField(
-                        controller: _name,
-                        maxLength: 100,
-                        textInputAction: TextInputAction.next,
-                        decoration: const InputDecoration(
-                          labelText: 'Product name *',
-                          prefixIcon: Icon(Icons.label_rounded),
-                        ),
-                        validator: _required,
-                      ),
-                      const SizedBox(height: 6),
-                      _loadingCategories
-                          ? const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 20),
-                              child: LinearProgressIndicator(),
-                            )
-                          : DropdownButtonFormField<int>(
-                              initialValue:
-                                  _categories.any(
-                                    (c) => c.categoryId == _categoryId,
-                                  )
-                                  ? _categoryId
-                                  : null,
-                              borderRadius: BorderRadius.circular(
-                                AppRadius.field,
-                              ),
-                              decoration: const InputDecoration(
-                                labelText: 'Category *',
-                                prefixIcon: Icon(Icons.sell_rounded),
-                              ),
-                              items: _categories
-                                  .map(
-                                    (c) => DropdownMenuItem(
-                                      value: c.categoryId,
-                                      child: Text(c.categoryName),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (v) => setState(() {
-                                _categoryId = v;
-                                _dirty = true;
-                              }),
-                              validator: (v) =>
-                                  v == null ? 'Please choose a category' : null,
-                            ),
-                      const SizedBox(height: 14),
-                      TextFormField(
-                        controller: _desc,
-                        maxLines: 2,
-                        decoration: const InputDecoration(
-                          labelText: 'Description',
-                          prefixIcon: Icon(Icons.notes_rounded),
-                          alignLabelWithHint: true,
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Category',
+                    style: TextStyle(
+                      color: Mart.grey,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                StaggerIn(
-                  index: 2,
-                  child: _Section(
-                    icon: Icons.inventory_rounded,
-                    title: 'Stock',
-                    children: [
-                      TextFormField(
-                        controller: _barcode,
-                        decoration: const InputDecoration(
-                          labelText: 'Barcode',
-                          prefixIcon: Icon(Icons.qr_code_rounded),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      TextFormField(
-                        controller: _expire,
-                        readOnly: true,
-                        onTap: _pickDate,
-                        decoration: InputDecoration(
-                          labelText: 'Expire date',
-                          prefixIcon: const Icon(Icons.event_rounded),
-                          suffixIcon: _expire.text.isEmpty
-                              ? null
-                              : IconButton(
-                                  tooltip: 'Clear date',
-                                  icon: const Icon(Icons.close_rounded),
-                                  onPressed: () => _expire.clear(),
-                                ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          ClayIconButton(
-                            icon: Icons.remove_rounded,
-                            tooltip: 'Decrease qty',
-                            onTap: () => _stepQty(-1),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: TextFormField(
-                              controller: _qty,
-                              textAlign: TextAlign.center,
-                              keyboardType: TextInputType.number,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly,
-                              ],
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                              ),
-                              decoration: const InputDecoration(
-                                labelText: 'Qty',
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          ClayIconButton(
-                            icon: Icons.add_rounded,
-                            tooltip: 'Increase qty',
-                            onTap: () => _stepQty(1),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                StaggerIn(
-                  index: 3,
-                  child: _Section(
-                    icon: Icons.payments_rounded,
-                    title: 'Pricing',
-                    trailing: AnimatedSwitcher(
-                      duration: AppMotion.normal,
-                      transitionBuilder: (c, a) =>
-                          ScaleTransition(scale: a, child: c),
-                      child: Pill(
-                        key: ValueKey(profit >= 0),
-                        text: 'Profit \$${profit.toStringAsFixed(2)}',
-                        icon: profit >= 0
-                            ? Icons.trending_up_rounded
-                            : Icons.trending_down_rounded,
-                        color: profit >= 0
-                            ? AppColors.success
-                            : AppColors.danger,
+                  const SizedBox(height: 10),
+                  if (_loadingCategories)
+                    const LinearProgressIndicator(color: Mart.coral)
+                  else
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        for (final c in _categories) _categoryChoice(c),
+                      ],
+                    ),
+                  if (_categoryMissing)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Choose a category',
+                        style: TextStyle(color: Mart.red, fontSize: 12),
                       ),
                     ),
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: _desc,
+                    minLines: 2,
+                    maxLines: 4,
+                    decoration: const InputDecoration(
+                      labelText: 'Description',
+                      alignLabelWithHint: true,
+                      prefixIcon: Icon(Icons.notes_rounded),
+                    ),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 16),
+              RiseIn(
+                index: 2,
+                child: _card('Inventory', [
+                  TextFormField(
+                    controller: _barcode,
+                    decoration: const InputDecoration(
+                      labelText: 'Barcode',
+                      prefixIcon: Icon(Icons.qr_code_scanner_rounded),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: _expire,
+                    readOnly: true,
+                    onTap: _pickDate,
+                    decoration: const InputDecoration(
+                      labelText: 'Expire date',
+                      prefixIcon: Icon(Icons.event_rounded),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
                     children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: TextFormField(
-                              controller: _priceIn,
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
-                              decoration: const InputDecoration(
-                                labelText: 'Price in',
-                                prefixText: '\$ ',
-                              ),
-                              validator: _number,
-                            ),
+                      const Expanded(
+                        child: Text(
+                          'Quantity',
+                          style: TextStyle(
+                            color: Mart.navy,
+                            fontWeight: FontWeight.w700,
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextFormField(
-                              controller: _priceOut,
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
-                              decoration: const InputDecoration(
-                                labelText: 'Price out',
-                                prefixText: '\$ ',
-                              ),
-                              validator: _number,
-                            ),
+                        ),
+                      ),
+                      RoundButton(
+                        icon: Icons.remove_rounded,
+                        tooltip: 'Decrease',
+                        onTap: () => _step(-1),
+                        background: Mart.canvas,
+                      ),
+                      SizedBox(
+                        width: 72,
+                        child: TextFormField(
+                          controller: _qty,
+                          textAlign: TextAlign.center,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: Mart.navy,
                           ),
-                        ],
+                          decoration: const InputDecoration(
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            filled: false,
+                          ),
+                        ),
+                      ),
+                      RoundButton(
+                        icon: Icons.add_rounded,
+                        tooltip: 'Increase',
+                        onTap: () => _step(1),
+                        background: Mart.coral,
+                        iconColor: Colors.white,
                       ),
                     ],
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 16),
+              RiseIn(
+                index: 3,
+                child: _card('Pricing', [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _cost,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: 'Cost',
+                            prefixText: '\$ ',
+                          ),
+                          validator: _money,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _price,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: 'Selling price',
+                            prefixText: '\$ ',
+                          ),
+                          validator: _money,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: (profit < 0 ? Mart.red : Mart.mint).withValues(
+                        alpha: 0.1,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          profit < 0
+                              ? Icons.trending_down_rounded
+                              : Icons.trending_up_rounded,
+                          color: profit < 0 ? Mart.red : Mart.mint,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          profit < 0 ? 'Loss per unit' : 'Profit per unit',
+                          style: const TextStyle(
+                            color: Mart.navy,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '\$${profit.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            color: profit < 0 ? Mart.red : Mart.mint,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ]),
+              ),
+            ],
+          ),
+        ),
+        bottomNavigationBar: SafeArea(
+          minimum: const EdgeInsets.fromLTRB(20, 10, 20, 14),
+          child: CoralButton(
+            label: _isEdit ? 'Save changes' : 'Add product',
+            icon: Icons.check_rounded,
+            busy: _saving,
+            onTap: _save,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _card(String title, List<Widget> children) => Container(
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(
+      color: Mart.card,
+      borderRadius: BorderRadius.circular(24),
+      boxShadow: Mart.shadow(),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: Mart.navy,
+          ),
+        ),
+        const SizedBox(height: 14),
+        ...children,
+      ],
+    ),
+  );
+
+  Widget _categoryChoice(Category c) {
+    final selected = _categoryId == c.categoryId;
+    return Squeeze(
+      onTap: () => setState(() {
+        _categoryId = c.categoryId;
+        _categoryMissing = false;
+        _dirty = true;
+      }),
+      semanticLabel: 'Category ${c.categoryName}',
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          gradient: selected ? Mart.coralGradient : null,
+          color: selected ? null : Mart.canvas,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Mart.categoryIcon(c.categoryName),
+              size: 18,
+              color: selected ? Colors.white : Mart.coral,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              c.categoryName,
+              style: TextStyle(
+                color: selected ? Colors.white : Mart.navy,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _photoCard() {
+    final hasNew = _imageBytes != null;
+    final oldUrl = widget.product?.imageUrl;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Squeeze(
+          onTap: _choosePhoto,
+          semanticLabel: 'Choose product photo',
+          child: Container(
+            height: 210,
+            decoration: BoxDecoration(
+              color: Mart.coralTint,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: _photoMissing ? Mart.red : Colors.transparent,
+                width: 1.5,
+              ),
+            ),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (hasNew)
+                  Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Image.memory(_imageBytes!, fit: BoxFit.contain),
+                  )
+                else if (oldUrl != null)
+                  ProductImage(
+                    url: oldUrl,
+                    radius: 24,
+                    padding: const EdgeInsets.all(20),
+                  )
+                else
+                  const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.add_photo_alternate_rounded,
+                          size: 44,
+                          color: Mart.coral,
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Add a product photo',
+                          style: TextStyle(
+                            color: Mart.navy,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Required',
+                          style: TextStyle(color: Mart.grey, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                Positioned(
+                  right: 14,
+                  bottom: 14,
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      gradient: Mart.coralGradient,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Mart.coral.withValues(alpha: 0.4),
+                          blurRadius: 12,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.photo_camera_rounded,
+                      color: Colors.white,
+                      size: 22,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-          bottomNavigationBar: SafeArea(
-            minimum: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-            child: GradientButton(
-              label: _isEdit ? 'Update Product' : 'Save Product',
-              icon: Icons.save_rounded,
-              loading: _saving,
-              success: _saved,
-              onPressed: _save,
-            ),
-          ),
         ),
-      ),
-    );
-  }
-
-  Widget _imagePicker() {
-    final Widget image = _imageBytes != null
-        ? ClipRRect(
-            key: ValueKey(_image!.name + _imageBytes!.length.toString()),
-            borderRadius: BorderRadius.circular(32),
-            child: Image.memory(
-              _imageBytes!,
-              width: 150,
-              height: 150,
-              fit: BoxFit.cover,
-            ),
-          )
-        : ProductImage(
-            key: const ValueKey('remote'),
-            url: widget.product?.imageUrl,
-            size: 150,
-            radius: 32,
-          );
-
-    return Pressable3D(
-      onTap: _chooseImageSource,
-      semanticLabel: 'Choose product image',
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: clayBox(radius: 38).copyWith(
-              border: Border.all(
-                color: _imageError ? AppColors.danger : AppColors.glassBorder,
-                width: _imageError ? 2.5 : 1.5,
-              ),
-            ),
-            child: AnimatedSwitcher(
-              duration: AppMotion.slow,
-              transitionBuilder: _flip3D,
-              child: image,
+        if (_photoMissing)
+          const Padding(
+            padding: EdgeInsets.only(top: 8, left: 4),
+            child: Text(
+              'A product photo is required',
+              style: TextStyle(color: Mart.red, fontSize: 12),
             ),
           ),
-          Positioned(
-            right: -6,
-            bottom: -6,
-            child: Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                gradient: AppColors.gradient,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 3),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.primary.withValues(alpha: 0.35),
-                    blurRadius: 12,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: const Icon(
-                Icons.photo_camera_rounded,
-                color: Colors.white,
-                size: 22,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// New image flips in around the Y axis like a card.
-  Widget _flip3D(Widget child, Animation<double> anim) {
-    return AnimatedBuilder(
-      animation: anim,
-      child: child,
-      builder: (context, child) {
-        final v = anim.value;
-        return Transform(
-          alignment: Alignment.center,
-          transform: Matrix4.identity()
-            ..setEntry(3, 2, 0.002)
-            ..rotateY((1 - v) * math.pi / 2),
-          child: Opacity(opacity: v < 0.5 ? 0 : 1, child: child),
-        );
-      },
-    );
-  }
-}
-
-class _Section extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final Widget? trailing;
-  final List<Widget> children;
-
-  const _Section({
-    required this.icon,
-    required this.title,
-    required this.children,
-    this.trailing,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
-      decoration: clayBox(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: AppColors.primarySoft,
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                child: Icon(icon, size: 18, color: AppColors.primary),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 16,
-                    color: AppColors.text,
-                  ),
-                ),
-              ),
-              ?trailing,
-            ],
-          ),
-          const SizedBox(height: 16),
-          ...children,
-        ],
-      ),
-    );
-  }
-}
-
-/// Glassy bottom sheet with image source options
-class _ImageSourceSheet extends StatelessWidget {
-  final bool hasImage;
-  final VoidCallback onRemove;
-  const _ImageSourceSheet({required this.hasImage, required this.onRemove});
-
-  @override
-  Widget build(BuildContext context) {
-    Widget option(
-      IconData icon,
-      String title,
-      String sub,
-      Color color,
-      VoidCallback onTap,
-    ) => Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Pressable3D(
-        onTap: onTap,
-        maxTilt: 0.06,
-        semanticLabel: title,
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.10),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Icon(icon, color: color),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.text,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      sub,
-                      style: const TextStyle(
-                        color: AppColors.muted,
-                        fontSize: 12.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    return SafeArea(
-      child: Container(
-        margin: const EdgeInsets.all(12),
-        padding: const EdgeInsets.fromLTRB(18, 10, 18, 8),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.96),
-          borderRadius: BorderRadius.circular(32),
-          border: Border.all(color: Colors.white, width: 1.5),
-          boxShadow: clayShadow(),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40,
-              height: 5,
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: AppColors.muted.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(99),
-              ),
-            ),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Padding(
-                padding: EdgeInsets.only(bottom: 14),
-                child: Text(
-                  'Product image',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.text,
-                  ),
-                ),
-              ),
-            ),
-            option(
-              kIsWeb ? Icons.folder_open_rounded : Icons.photo_library_rounded,
-              kIsWeb ? 'Choose a photo' : 'Choose from gallery',
-              kIsWeb
-                  ? 'Photos, camera (iPhone) or files (laptop)'
-                  : 'Photos + images dragged from your laptop',
-              AppColors.primary,
-              () => Navigator.pop(context, ImageSource.gallery),
-            ),
-            if (!kIsWeb)
-              option(
-                Icons.photo_camera_rounded,
-                'Take a photo',
-                'Use the camera',
-                const Color(0xFF0E8FD6),
-                () => Navigator.pop(context, ImageSource.camera),
-              ),
-            if (hasImage)
-              option(
-                Icons.delete_outline_rounded,
-                'Remove selected image',
-                'Keep the current image instead',
-                AppColors.danger,
-                onRemove,
-              ),
-          ],
-        ),
-      ),
+      ],
     );
   }
 }

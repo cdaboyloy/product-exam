@@ -26,7 +26,7 @@ class IPhoneFrame extends StatelessWidget {
     return DecoratedBox(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: [Color(0xFFEDE9FF), Color(0xFFE3EEFF), Color(0xFFFCE7F3)],
+          colors: [Color(0xFFFFF4EE), Color(0xFFF6F6F9)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -59,19 +59,18 @@ class IPhoneFrame extends StatelessWidget {
                         borderRadius: BorderRadius.circular(radius + bezel),
                         gradient: const LinearGradient(
                           colors: [
-                            Color(0xFF3A3A3F),
-                            Color(0xFF1B1B1F),
-                            Color(0xFF3A3A3F),
+                            Color(0xFF3B4A6B),
+                            Color(0xFF1F2A44),
+                            Color(0xFF3B4A6B),
                           ],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
                         boxShadow: const [
                           BoxShadow(
-                            color: Color(0x406C5CE7),
-                            blurRadius: 60,
-                            offset: Offset(0, 30),
-                            spreadRadius: -10,
+                            color: Color(0x40FF6B3D),
+                            blurRadius: 40,
+                            offset: Offset(0, 20),
                           ),
                           BoxShadow(
                             color: Color(0x33000000),
@@ -116,7 +115,7 @@ class IPhoneFrame extends StatelessWidget {
         width: 6,
         height: height,
         decoration: BoxDecoration(
-          color: const Color(0xFF2A2A2E),
+          color: const Color(0xFF2A3654),
           borderRadius: BorderRadius.circular(3),
         ),
       ),

@@ -19,7 +19,7 @@ class ProductApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Product Manager',
+      title: 'Pocket Mart',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
       // On a wide laptop/Chrome window, show the app inside an iPhone frame
